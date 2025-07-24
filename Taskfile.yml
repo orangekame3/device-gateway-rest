@@ -1,0 +1,211 @@
+version: '3'
+
+vars:
+  APP_NAME: quantum-api
+  PORT: 9000
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # Development tasks
+  install:
+    desc: Install dependencies
+    cmds:
+      - uv sync
+
+  dev:
+    desc: Start development server
+    deps: [install]
+    cmds:
+      - uv run python main.py
+
+  dev-watch:
+    desc: Start development server with auto-reload
+    deps: [install]
+    cmds:
+      - uv run uvicorn main:app --host 0.0.0.0 --port {{.PORT}} --reload
+
+  # Code quality tasks
+  format:
+    desc: Format code with ruff
+    deps: [install]
+    cmds:
+      - uv run ruff format main.py
+
+  lint:
+    desc: Lint code with ruff
+    deps: [install]
+    cmds:
+      - uv run ruff check main.py
+
+  lint-fix:
+    desc: Lint and auto-fix code issues
+    deps: [install]
+    cmds:
+      - uv run ruff check --fix main.py
+
+  check:
+    desc: Run all code quality checks
+    deps: [format, lint]
+
+  # Testing tasks
+  test:
+    desc: Test API endpoints with curl
+    cmds:
+      - |
+        echo "Testing health endpoint..."
+        curl -s "http://localhost:{{.PORT}}/health" | jq || echo "jq not installed, showing raw output:"
+        curl -s "http://localhost:{{.PORT}}/health"
+        echo
+        echo "Testing quantum random endpoint..."
+        curl -s -X POST "http://localhost:{{.PORT}}/quantum-random" \
+          -H "Content-Type: application/json" \
+          -d '{"n_bits": 8}' | xxd || echo "xxd not available"
+
+  test-client:
+    desc: Run test client (if available)
+    cmds:
+      - uv run python test_client.py --url "http://localhost:{{.PORT}}" --bits 16
+
+  # SSL certificate tasks
+  ssl-cert:
+    desc: Generate SSL certificates for HTTPS
+    cmds:
+      - mkdir -p certs
+      - |
+        openssl req -x509 -newkey rsa:4096 -keyout certs/key.pem -out certs/cert.pem \
+          -days 365 -nodes -subj "/C=JP/ST=Local/L=Local/O=QuantumAPI/CN=localhost"
+      - echo "SSL certificates generated in certs/"
+
+  ssl-clean:
+    desc: Remove SSL certificates
+    cmds:
+      - rm -rf certs/
+
+  # Docker tasks
+  docker-build:
+    desc: Build Docker image
+    cmds:
+      - docker compose build api
+
+  docker-up:
+    desc: Start services with Docker
+    cmds:
+      - docker compose up -d api
+
+  docker-up-tunnel:
+    desc: Start API and Cloudflare tunnel
+    cmds:
+      - docker compose up -d
+
+  docker-down:
+    desc: Stop Docker services
+    cmds:
+      - docker compose down
+
+  docker-logs:
+    desc: View Docker logs
+    cmds:
+      - docker compose logs -f api
+
+  docker-restart:
+    desc: Restart Docker services
+    cmds:
+      - task: docker-down
+      - task: docker-up
+
+  docker-clean:
+    desc: Clean Docker resources
+    cmds:
+      - docker compose down -v --remove-orphans
+      - docker system prune -f
+
+  # Environment tasks
+  env-setup:
+    desc: Set up environment file
+    cmds:
+      - |
+        if [ ! -f .env ]; then
+          cp .env.example .env
+          echo "Created .env file from .env.example"
+          echo "Please edit .env file with your configuration"
+        else
+          echo ".env file already exists"
+        fi
+
+  env-show:
+    desc: Show current environment variables
+    cmds:
+      - |
+        echo "Current environment configuration:"
+        echo "QUANTUM_BACKEND=${QUANTUM_BACKEND:-simulator}"
+        echo "QUANTUM_N_QUBITS=${QUANTUM_N_QUBITS:-4}"
+        echo "PORT=${PORT:-9000}"
+        echo "API_KEY=${API_KEY:+[SET]}"
+        echo "TUNNEL_TOKEN=${TUNNEL_TOKEN:+[SET]}"
+
+  # Deployment tasks
+  deploy-setup:
+    desc: Setup for deployment
+    deps: [env-setup]
+    cmds:
+      - task: docker-build
+      - echo "Deployment setup complete"
+
+  deploy:
+    desc: Deploy with Docker and Cloudflare tunnel
+    deps: [deploy-setup]
+    cmds:
+      - task: docker-up-tunnel
+      - echo "Deployment started"
+      - echo "Check Cloudflare dashboard for tunnel URL"
+
+  # Utility tasks
+  clean:
+    desc: Clean temporary files
+    cmds:
+      - rm -rf __pycache__/
+      - rm -rf .pytest_cache/
+      - rm -rf *.pyc
+      - rm -rf .coverage
+      - echo "Cleaned temporary files"
+
+  status:
+    desc: Show service status
+    cmds:
+      - |
+        echo "=== Service Status ==="
+        if command -v docker >/dev/null 2>&1; then
+          echo "Docker services:"
+          docker compose ps
+        fi
+        echo
+        echo "Local service check:"
+        if curl -s "http://localhost:{{.PORT}}/health" >/dev/null 2>&1; then
+          echo "✓ API is running on port {{.PORT}}"
+        else
+          echo "✗ API is not running on port {{.PORT}}"
+        fi
+
+  help:
+    desc: Show detailed help
+    cmds:
+      - |
+        echo "Quantum Random Number Generator API - Task Runner"
+        echo "================================================"
+        echo
+        echo "Development workflow:"
+        echo "  task install     # Install dependencies"
+        echo "  task dev         # Start development server"
+        echo "  task check       # Run code quality checks"
+        echo "  task test        # Test API endpoints"
+        echo
+        echo "Docker workflow:"
+        echo "  task env-setup   # Create .env file"
+        echo "  task deploy      # Deploy with Docker + Cloudflare"
+        echo "  task status      # Check service status"
+        echo
+        echo "Use 'task --list' to see all available tasks"

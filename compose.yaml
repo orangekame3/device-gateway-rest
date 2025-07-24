@@ -1,0 +1,35 @@
+services:
+  api:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "9000:9000"
+    environment:
+      - API_KEY=${API_KEY}
+      - QUANTUM_BACKEND=${QUANTUM_BACKEND:-simulator}
+      - QUANTUM_N_QUBITS=${QUANTUM_N_QUBITS:-4}
+    command: uv run uvicorn main:app --host 0.0.0.0 --port 9000
+    volumes:
+      - .:/app
+    network_mode: host
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:9000/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  tunnel:
+    image: cloudflare/cloudflared
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+    network_mode: host
+    depends_on:
+      api:
+        condition: service_healthy
