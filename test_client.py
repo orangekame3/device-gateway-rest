@@ -74,7 +74,7 @@ def analyze_randomness(bits: str) -> dict:
 
 
 def test_quantum_random_api(
-    base_url: str, n_bits: int, backend: str = None, verify_ssl: bool = False
+    base_url: str, n_bits: int, api_key: str, backend: str = None, verify_ssl: bool = False
 ) -> None:
     """
     Test the quantum random API
@@ -82,23 +82,24 @@ def test_quantum_random_api(
     Args:
         base_url: Base URL of the API
         n_bits: Number of bits to request
+        api_key: API key for authentication
         backend: Backend type to use ('simulator' or 'hardware')
         verify_ssl: Whether to verify SSL certificates
     """
     url = f"{base_url}/quantum-random"
     payload = {"n_bits": n_bits}
-    if backend:
-        payload["backend"] = backend
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": api_key
+    }
 
     print("Testing Quantum Random API")
     print(f"URL: {url}")
     print(f"Requesting {n_bits} bits...")
-    if backend:
-        print(f"Backend: {backend}")
     print("-" * 50)
 
     try:
-        response = requests.post(url, json=payload, verify=verify_ssl, timeout=30)
+        response = requests.post(url, json=payload, headers=headers, verify=verify_ssl, timeout=30)
 
         print(f"Status Code: {response.status_code}")
         print(f"Headers: {dict(response.headers)}")
@@ -176,17 +177,19 @@ def main():
     parser = argparse.ArgumentParser(description="Test client for Quantum Random API")
     parser.add_argument(
         "--url",
-        default="https://localhost:8443",
-        help="Base URL of the API (default: https://localhost:8443)",
+        default="http://localhost:9001",
+        help="Base URL of the API (default: http://localhost:9001)",
     )
     parser.add_argument(
         "--bits", type=int, default=16, help="Number of bits to request (default: 16)"
     )
+    parser.add_argument(
+        "--api-key", 
+        default="hogehoge",
+        help="API key for authentication (default: hogehoge)"
+    )
     parser.add_argument("--verify-ssl", action="store_true", help="Verify SSL certificates")
     parser.add_argument("--no-health", action="store_true", help="Skip health check tests")
-    parser.add_argument(
-        "--backend", choices=["simulator", "hardware"], help="Specify backend type to use"
-    )
 
     args = parser.parse_args()
 
@@ -199,7 +202,7 @@ def main():
         test_health_endpoints(args.url, args.verify_ssl)
 
     # Test quantum random endpoint
-    test_quantum_random_api(args.url, args.bits, args.backend, args.verify_ssl)
+    test_quantum_random_api(args.url, args.bits, args.api_key, None, args.verify_ssl)
 
 
 if __name__ == "__main__":

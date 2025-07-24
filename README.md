@@ -6,41 +6,42 @@ A simple REST API for generating quantum random numbers using Qiskit simulator o
 
 ### Prerequisites
 
-Install [Task](https://taskfile.dev/) for easy command management:
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) package manager
 
 ```bash
-# macOS
-brew install go-task/tap/go-task
-
-# Or download from https://taskfile.dev/installation/
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ### 1. Setup and Install
 
 ```bash
-# Install dependencies and setup environment
-task install
-task env-setup
+# Install dependencies
+uv sync
 ```
 
 ### 2. Start Development Server
 
 ```bash
-# Start server (port 9000)
-task dev
+# Start server (port 9001)
+uv run uvicorn main:app --host 0.0.0.0 --port 9001
 
 # Or with auto-reload for development
-task dev-watch
+uv run uvicorn main:app --host 0.0.0.0 --port 9001 --reload
 ```
 
 ### 3. Test API
 
 ```bash
-# Test endpoints
-task test
+# Test with Python client
+uv run python test_client.py --bits 10 --api-key hogehoge
 
-# Check service status
-task status
+# Or with curl
+curl -X POST "http://localhost:9001/quantum-random" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: hogehoge" \
+  -d '{"n_bits": 16}'
 ```
 
 ### Quick Commands
@@ -65,14 +66,17 @@ task status     # Check service status
 Use environment variables to configure the server:
 
 ```bash
-# Backend selection (simulator or hardware)
-export QUANTUM_BACKEND=simulator
+# Required: API key for authentication
+export API_KEY=your-secret-api-key
 
-# Number of qubits for simulator
+# Optional: Backend selection (sim or qpu)
+export QUANTUM_BACKEND=sim
+
+# Optional: Number of qubits for simulator
 export QUANTUM_N_QUBITS=4
 
 # Start server
-uv run python main.py
+uv run uvicorn main:app --host 0.0.0.0 --port 9001
 ```
 
 ## API Endpoints
@@ -81,11 +85,13 @@ uv run python main.py
 
 **POST** `/quantum-random`
 
+**Headers:**
+- `X-API-Key`: Required API key for authentication
+
 **Request:**
 ```json
 {
-  "n_bits": 16,
-  "backend": "simulator"  // optional: "simulator" or "hardware"
+  "n_bits": 16
 }
 ```
 
@@ -105,13 +111,10 @@ uv run python main.py
 {
   "status": "healthy",
   "version": "2.0.0",
-  "config": {
-    "backend": "simulator",
-    "n_qubits": 4
-  },
+  "current_backend": "sim",
   "backends": {
-    "simulator": "available",
-    "hardware": "placeholder (Osaka server not ready)"
+    "sim": "available",
+    "qpu": "placeholder (Osaka server not ready)"
   }
 }
 ```
@@ -122,17 +125,44 @@ Test the API with curl:
 
 ```bash
 # Basic test
-curl "http://localhost:9000/health"
+curl "http://localhost:9001/health"
 
-# Generate random bits
-curl -X POST "http://localhost:9000/quantum-random" \
+# Generate random bits (requires API key)
+curl -X POST "http://localhost:9001/quantum-random" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: hogehoge" \
   -d '{"n_bits": 16}'
 
-# Test with different backends
-curl -X POST "http://localhost:9000/quantum-random" \
+# Save binary output to file and decode
+curl -X POST "http://localhost:9001/quantum-random" \
   -H "Content-Type: application/json" \
-  -d '{"n_bits": 32, "backend": "simulator"}'
+  -H "X-API-Key: hogehoge" \
+  -d '{"n_bits": 10}' \
+  -o output.bin
+
+# View binary data as hex
+xxd output.bin
+
+# Decode to binary string (Python one-liner - recommended)
+python3 -c "
+with open('output.bin', 'rb') as f: data = f.read()
+bits = ''.join(format(b, '08b') for b in data)
+n_bits = 10  # change this to your requested bits
+print(f'Binary: {bits[:n_bits]}')
+print(f'Hex: {data.hex()}')
+"
+
+# Quick binary-only output
+python3 -c "
+with open('output.bin', 'rb') as f: data = f.read()
+print(''.join(format(b, '08b') for b in data)[:10])
+"
+
+# With variable
+n_bits=10; python3 -c "
+with open('output.bin', 'rb') as f: data = f.read()
+print(''.join(format(b, '08b') for b in data)[:$n_bits])
+"
 ```
 
 ## Hardware Backend
@@ -159,6 +189,9 @@ Based on the Slack discussion:
 ```json
 {"n_bits": 24}
 ```
+
+**Authentication:**
+- Required `X-API-Key` header with valid API key
 
 **Server Processing:**
 1. Server determines available quantum bits (n_qubits)
@@ -242,10 +275,10 @@ Required variables in `.env` file:
 
 ```bash
 # Quantum Configuration
-QUANTUM_BACKEND=simulator    # simulator or hardware
+QUANTUM_BACKEND=sim         # sim or qpu
 QUANTUM_N_QUBITS=4          # Number of qubits for simulator
 
-# Security (optional)
+# Security (required)
 API_KEY=your-secret-key     # API key for authentication
 
 # Cloudflare Tunnel

@@ -24,17 +24,6 @@ COPY main.py ./
 
 # Create certs directory (SSL certificates can be mounted here)
 RUN mkdir -p certs
-
-# Expose ports
-EXPOSE 8000 8443
-
 # Set environment variables
 ENV QUANTUM_BACKEND=simulator
 ENV QUANTUM_N_QUBITS=4
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/', timeout=5)" || exit 1
-
-# Run the application
-CMD ["uv", "run", "python", "main.py"]

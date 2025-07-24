@@ -2,8 +2,7 @@ import logging
 import math
 import os
 
-import requests
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, Depends, Header
 from pydantic import BaseModel
 from qiskit import QuantumCircuit, transpile
 from qiskit_aer import Aer
@@ -16,31 +15,31 @@ app = FastAPI(title="Quantum Random Number Generator", version="2.0.0")
 
 class RandomRequest(BaseModel):
     n_bits: int
-    backend: str | None = None
 
 
 def generate_with_simulator(n_bits: int) -> bytes:
     """Generate random bits using Qiskit simulator"""
-    n_qubits = 4
+    n_qubits = int(os.getenv("N_QUBITS", 4))
     shots = math.ceil(n_bits / n_qubits)
 
     # Create quantum circuit
-    qc = QuantumCircuit(n_qubits, n_qubits)
+    qc = QuantumCircuit(n_qubits)
     for i in range(n_qubits):
         qc.h(i)
     qc.measure_all()
 
-    # Run simulation
+    # Run simulation with memory=True to get individual shot results
     simulator = Aer.get_backend("aer_simulator")
-    result = simulator.run(transpile(qc, simulator), shots=shots).result()
-    counts = result.get_counts()
+    result = simulator.run(transpile(qc, simulator), shots=shots, memory=True).result()
+    memory = result.get_memory()
+    logger.info(f"Generated {len(memory)} shots of random bits")
+    logger.info(f"Memory results: {memory}")
 
     # Convert to bits
     random_bits = []
-    for outcome, count in counts.items():
-        for _ in range(count):
-            clean_outcome = outcome.replace(" ", "")
-            random_bits.extend([int(bit) for bit in clean_outcome])
+    for outcome in memory:
+        clean_outcome = outcome.replace(" ", "")
+        random_bits.extend([int(bit) for bit in clean_outcome])
 
     # Adjust to required bits
     random_bits = random_bits[:n_bits]
@@ -62,27 +61,26 @@ def generate_with_simulator(n_bits: int) -> bytes:
     return bytes(byte_array)
 
 
-def generate_with_hardware(n_bits: int) -> bytes:
-    """Generate random bits using real hardware"""
-    hardware_url = "https://quantum-device.example.com/api/v1"
+def generate_with_qpu(n_bits: int) -> bytes:
+    """Generate random bits using QPU (uses same algorithm as simulator)"""
+    # QPU uses the same quantum circuit algorithm as simulator
+    # In the future, this could connect to actual quantum hardware
+    # For now, we use the same implementation
+    return generate_with_simulator(n_bits)
 
-    payload = {"n_bits": n_bits}
 
-    try:
-        response = requests.post(f"{hardware_url}/quantum-random", json=payload, timeout=30)
-
-        if response.status_code == 200:
-            return response.content
-        else:
-            raise Exception(f"Hardware error: {response.status_code}")
-
-    except Exception as e:
-        logger.error(f"Hardware failed: {e}, falling back to simulator")
-        return generate_with_simulator(n_bits)
+def verify_api_key(x_api_key: str = Header(alias="X-API-Key")):
+    """Verify API key from header"""
+    expected_key = os.getenv("API_KEY")
+    if not expected_key:
+        raise HTTPException(status_code=500, detail="API key not configured")
+    if x_api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return x_api_key
 
 
 @app.post("/quantum-random")
-def generate_random_bits(request: RandomRequest):
+def generate_random_bits(request: RandomRequest, api_key: str = Depends(verify_api_key)):
     """Generate quantum random bits"""
     if request.n_bits <= 0:
         raise HTTPException(status_code=400, detail="n_bits must be positive")
@@ -91,19 +89,15 @@ def generate_random_bits(request: RandomRequest):
         raise HTTPException(status_code=400, detail="n_bits must be <= 10000")
 
     try:
-        # Choose backend
+        # Choose backend based on environment variable only
+        backend = os.getenv("BACKEND", "sim").lower()
 
-        use_hardware = (
-            request.backend == "hardware"
-            or os.getenv("QUANTUM_BACKEND", "simulator").lower() == "hardware"
-        )
-
-        if use_hardware:
-            random_bytes = generate_with_hardware(request.n_bits)
-            backend_name = "hardware"
-        else:
+        if backend == "qpu":
+            random_bytes = generate_with_qpu(request.n_bits)
+            backend_name = "qpu"
+        else:  # default to simulator
             random_bytes = generate_with_simulator(request.n_bits)
-            backend_name = "simulator"
+            backend_name = "sim"
 
         return Response(
             content=random_bytes,
@@ -128,12 +122,14 @@ def root():
 @app.get("/health")
 def health():
     """Health check with backend info"""
+    current_backend = os.getenv("QUANTUM_BACKEND", "sim").lower()
     return {
         "status": "healthy",
         "version": "2.0.0",
+        "current_backend": current_backend,
         "backends": {
-            "simulator": "available",
-            "hardware": "placeholder (Osaka server not ready)",
+            "sim": "available",
+            "qpu": "placeholder (Osaka server not ready)",
         },
     }
 
